@@ -3,7 +3,7 @@
 Plugin Name: Custom Template Dependencies
 Plugin URI:  https://untitled-production.com/
 Description: Create dependencies between your page templates and custom fields. Auto-creation of custom fields for different templates.
-Version:     0.1.0
+Version:     0.2.0
 Author:      Sergey Khomenko
 Author URI:  https://untitled-production.com/
 */
@@ -18,7 +18,6 @@ class Custom_Template_Dependencies {
 
 	function __construct(){
 		$this->settings = $this->get_plugin_option();
-
 		$this->run_action_queue();
 	}
 
@@ -48,18 +47,11 @@ class Custom_Template_Dependencies {
 	}
 
 	function plugin_options(){
-		if( isset( $_POST['ctd_plugin_options'] ) ){
-			$this->update_plugin_options( $_POST['ctd_plugin_options'] );
-		}
-
-		if ( ! isset( $_REQUEST['settings-updated'] ) ){
-			$_REQUEST['settings-updated'] = false;
-		}
-
+		$_REQUEST['settings-updated'] = $this->update_plugin_options( $_POST['ctd_plugin_options'] );
 		?>
 		<div class="wrap">
 			<h2>Custom Template Dependencies</h2>
-			<?php if ( false !== $_REQUEST['settings-updated'] ) : ?>
+			<?php if ( $_REQUEST['settings-updated'] ) : ?>
 				<div id="message" class="updated">
 					<p><strong><?php _e( 'Настройки сохранены', 'WP-Unique' ); ?></strong></p>
 				</div>
@@ -124,27 +116,47 @@ class Custom_Template_Dependencies {
 	}
 
 	function update_plugin_options( $request ){
+		global $wpdb;
+
 		if( ! isset($request) || $request == false )
 			return false;
 
 		// Remove unsed rules
 		if( count( $_POST['ctd_plugin_rule_remove'] ) >= 1 ){
 			foreach( $_POST['ctd_plugin_rule_remove'] as $key ){
+				// temporary rule object
+				$tro = (object) $this->settings['rules'][$key];
+
+				$wpdb->query("DELETE FROM `$wpdb->postmeta` WHERE `meta_key` = '$tro->cstm_field' AND `meta_value` = '$tro->def_value'");
 				unset( $this->settings['rules'][$key] );
 			}
 		}
 
 		// Add new
-		if( !empty( $request['rule_name'] ) ){
+		$have_empty_fields = false;
+		foreach ($request as $value) {
+			if( empty($value) )
+				$have_empty_fields = true;
+		}
+
+		if( ! $have_empty_fields ){
+			// Adding new rule to settings array
 			$this->settings['rules'][] = array(
 				'rule_name' => $request['rule_name'],
 				'tpl_path' => $request['tpl_path'],
 				'cstm_field' => $request['cstm_field'],
 				'def_value' => $request['def_value']
 			);
+
+			// Auto-configuring posts for new rule
+			$tpl_path = $request['tpl_path'];
+			$posts_under_rule = $wpdb->get_results("SELECT `post_id` FROM `$wpdb->postmeta` WHERE `meta_key` = '_wp_page_template' AND `meta_value` = '$tpl_path'");
+			foreach ( $posts_under_rule as $p ) {
+				add_post_meta( $p->post_id, $request['cstm_field'], $request['def_value'] );
+			}
 		}
 
-		update_option( 'ctd_plugin_options', $this->settings );
+		return update_option( 'ctd_plugin_options', $this->settings );
 	}
 
 	public function apply_rules_filter( $content ){
